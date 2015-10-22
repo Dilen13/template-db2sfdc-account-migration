@@ -1,10 +1,10 @@
 <?xml version="1.0" encoding="UTF-8"?>
 
-<mule xmlns:dw="http://www.mulesoft.org/schema/mule/ee/dw" xmlns:spring="http://www.springframework.org/schema/beans" xmlns:db="http://www.mulesoft.org/schema/mule/db" xmlns:core="http://www.mulesoft.org/schema/mule/core"
+<mule xmlns:validation="http://www.mulesoft.org/schema/mule/validation" xmlns:tracking="http://www.mulesoft.org/schema/mule/ee/tracking" xmlns:dw="http://www.mulesoft.org/schema/mule/ee/dw" xmlns:spring="http://www.springframework.org/schema/beans" xmlns:db="http://www.mulesoft.org/schema/mule/db" xmlns:core="http://www.mulesoft.org/schema/mule/core"
 	xmlns="http://www.mulesoft.org/schema/mule/core" xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
 	xmlns:batch="http://www.mulesoft.org/schema/mule/batch" xmlns:sfdc="http://www.mulesoft.org/schema/mule/sfdc"
 	xmlns:smtp="http://www.mulesoft.org/schema/mule/smtp" xmlns:json="http://www.mulesoft.org/schema/mule/json"
-	version="EE-3.7.2"
+	
 	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
 	xsi:schemaLocation="http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
 http://www.mulesoft.org/schema/mule/batch http://www.mulesoft.org/schema/mule/batch/current/mule-batch.xsd
@@ -13,9 +13,11 @@ http://www.mulesoft.org/schema/mule/sfdc http://www.mulesoft.org/schema/mule/sfd
 http://www.mulesoft.org/schema/mule/smtp http://www.mulesoft.org/schema/mule/smtp/current/mule-smtp.xsd
 http://www.mulesoft.org/schema/mule/db http://www.mulesoft.org/schema/mule/db/current/mule-db.xsd
 http://www.springframework.org/schema/beans http://www.springframework.org/schema/beans/spring-beans-current.xsd
-http://www.mulesoft.org/schema/mule/ee/dw http://www.mulesoft.org/schema/mule/ee/dw/current/dw.xsd">
+http://www.mulesoft.org/schema/mule/ee/dw http://www.mulesoft.org/schema/mule/ee/dw/current/dw.xsd
+http://www.mulesoft.org/schema/mule/ee/tracking http://www.mulesoft.org/schema/mule/ee/tracking/current/mule-tracking-ee.xsd
+http://www.mulesoft.org/schema/mule/validation http://www.mulesoft.org/schema/mule/validation/current/mule-validation.xsd">
 
- <batch:job name="migrateAccountsBatch">
+ <batch:job name="migrateAccountsBatch" max-failed-records="1">
         <batch:threading-profile poolExhaustedAction="WAIT"/>
         <batch:input>
             <db:select config-ref="Database" doc:name="Database">
@@ -25,10 +27,10 @@ http://www.mulesoft.org/schema/mule/ee/dw http://www.mulesoft.org/schema/mule/ee
         <batch:process-records>
             <batch:step name="getAccountInSalesforceStep">
                 <enricher source="#[payload == null ? null : payload.Id]" target="#[payload.Id]" doc:name="store result in payload Id">
-                    <sfdc:query-single config-ref="Salesforce" query="SELECT Id FROM Account WHERE Name = '#[payload['Name']]'" doc:name="Query Account from Salesforce"/>
+                   <sfdc:query-single config-ref="Salesforce" query="SELECT Id FROM Account WHERE Name = '#[payload['Name']]'" doc:name="Query Account from Salesforce"/>
                 </enricher>
             </batch:step>
-            <batch:step name="upsertAccountsInSalesforceStep" >
+            <batch:step name="upsertAccountsInSalesforceStep">
                 <batch:commit size="${page.size}" doc:name="Batch Commit">
                     <dw:transform-message doc:name="DB account to SFDC account">
                         <dw:set-payload><![CDATA[%dw 1.0
@@ -40,15 +42,34 @@ payload map
 	Description: $.Description,
 	Id: $.Id,
 	Name: $.Name,
-	NumberOfEmployees: $.NumberOfEmployees as :number {class: "java.lang.Integer"} default 0,
+	NumberOfEmployees: $.NumberOfEmployees default 0,
 	Industry: $.Industry
 }]]></dw:set-payload>
                     </dw:transform-message>
-					<sfdc:upsert config-ref="Salesforce"  type="Account" doc:name="Upsert accounts in Salesforce" externalIdFieldName="Id">
+                    <sfdc:upsert config-ref="Salesforce" externalIdFieldName="Id" type="Account" doc:name="Upsert accounts in Salesforce">
                         <sfdc:objects ref="#[payload]"/>
-					</sfdc:upsert>
-                    <logger message="#[payload]" level="INFO" doc:name="Log response"/>
-                </batch:commit>
+                    </sfdc:upsert>
+                    <foreach collection="#[payload]" doc:name="For Each SFDC Upsert result">
+                        <validation:custom-validator ref="SfdcResultValidator" doc:name="Validate the results"/>
+                    </foreach>
+                    <logger message="#[payload] -- #[payload[0].getErrors()]" level="INFO" doc:name="Log response"/>
+                    </batch:commit>
+                
+            </batch:step>
+            <batch:step name="tryToRecoverFromErrors" accept-policy="ONLY_FAILURES">
+                <choice doc:name="Choice">
+                    <when expression="failureExceptionForStep(&quot;getAccountInSalesforceStep&quot;) != null">
+                        <logger message="Salesforce credentials are wrong..." level="ERROR" doc:name="Log the bad SFDC credentials"/>
+                    </when>
+                    <when expression="failureExceptionForStep(&quot;upsertAccountsInSalesforceStep&quot;) != null">
+                        <tracking:custom-event event-name="Validation exception occurs" doc:name="Send Custom Business Event with exception message">
+                            <tracking:meta-data key="Exception message" value="failureExceptionForStep(&quot;upsertAccountsInSalesforceStep&quot;).getMessage()"/>
+                        </tracking:custom-event>
+                    </when>
+                    <otherwise>
+                        <logger level="INFO" doc:name="Log the strange exception" message="Some strange exception occurs, but bussiness event was not generated."/>
+                    </otherwise>
+                </choice>
             </batch:step>
         </batch:process-records>
         <batch:on-complete>
@@ -70,7 +91,7 @@ payload map
 This flow should control the direction of the application, and it should be called by the different endpoints that your Template exposes to trigger it.
 
 ">
-        <batch:execute name="migrateAccountsBatch" doc:name="Trigger migrateAccountsBatch"/>
+        <batch:execute name="migrateAccountsBatch" doc:name="migrateAccountsBatch"/>
         <exception-strategy ref="defaultChoiceExceptionStrategy" doc:name="Catch Exception and call defaultChoiceExceptionStrategy"/>
     </flow>
     
