@@ -27,10 +27,6 @@ http://www.springframework.org/schema/context http://www.springframework.org/sch
         <sfdc:connection-pooling-profile initialisationPolicy="INITIALISE_ONE" exhaustedAction="WHEN_EXHAUSTED_GROW"/>
     </sfdc:config>
     
-    <sfdc:config name="SalesforceBad" username="${sfdc.username}" password="${sfdc.bad.password}" securityToken="${sfdc.securityToken}" url="${sfdc.url}" doc:name="Salesforce" doc:description="SalesForce instance">
-        <sfdc:connection-pooling-profile initialisationPolicy="INITIALISE_ONE" exhaustedAction="WHEN_EXHAUSTED_GROW"/>
-    </sfdc:config>
-    
     <db:generic-config name="Database" url="${db.jdbcUrl}" driverClassName="com.mysql.jdbc.Driver" doc:name="Database instance"/>
     <spring:beans>
         <spring:bean id="SfdcResultValidator" name="SfdcResultValidator" class="org.mule.templates.validator.SfdcResultValidator" scope="singleton"/>

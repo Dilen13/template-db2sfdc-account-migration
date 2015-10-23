@@ -1,9 +1,11 @@
 <?xml version="1.0" encoding="UTF-8"?>
 
-<mule xmlns="http://www.mulesoft.org/schema/mule/core" xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
-	xmlns:spring="http://www.springframework.org/schema/beans" version="EE-3.7.2"
+<mule xmlns:tracking="http://www.mulesoft.org/schema/mule/ee/tracking"
+	xmlns="http://www.mulesoft.org/schema/mule/core" xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+	xmlns:spring="http://www.springframework.org/schema/beans" 
 	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-	xsi:schemaLocation="http://www.springframework.org/schema/beans http://www.springframework.org/schema/beans/spring-beans-current.xsd
+	xsi:schemaLocation="http://www.mulesoft.org/schema/mule/ee/tracking http://www.mulesoft.org/schema/mule/ee/tracking/current/mule-tracking-ee.xsd
+http://www.springframework.org/schema/beans http://www.springframework.org/schema/beans/spring-beans-current.xsd
 http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd">
 	
 	<!-- In this file you should declare all your Exception Strategies and Choice Exception Strategies in order to have a centralized control over the application error handling -->
@@ -13,4 +15,24 @@ http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/cor
             <logger level="INFO" doc:name="Logger"/>
         </catch-exception-strategy>
     </choice-exception-strategy>
+    <sub-flow name="tryToRecoverFromErrorsFlow">
+    <choice doc:name="Choise the strategy">
+                    <when expression="failureExceptionForStep(&quot;getAccountInSalesforceStep&quot;) != null">
+                <set-variable variableName="message" value="Salesforce credentials are wrong." doc:name="Set 'message' variable"/>
+                        <logger message="#[flowVars.message]" level="ERROR" doc:name="Log the bad SFDC credentials"/>
+                    </when>
+                    <when expression="failureExceptionForStep(&quot;upsertAccountsInSalesforceStep&quot;) != null">
+                <set-variable variableName="message" value="#[failureExceptionForStep(&quot;upsertAccountsInSalesforceStep&quot;).getMessage()]" doc:name="Set 'message' variable"/>
+                <logger message="#[flowVars.message]" level="INFO" doc:name="Log the validation exception"/>
+
+                    </when>
+                    <otherwise>
+                <set-variable variableName="message" value="Some strange exception occurs, but bussiness event was not generated." doc:name="Set 'message' variable"/>
+                        <logger level="INFO" doc:name="Log the strange exception" message="#[flowVars.message]"/>
+                    </otherwise>
+                </choice>
+        <tracking:custom-event event-name="Exception details" doc:name="Send Custom Business Event with exception message">
+            <tracking:meta-data key="Exception message" value="flowvars.message"/>
+        </tracking:custom-event>
+    </sub-flow>
 </mule>

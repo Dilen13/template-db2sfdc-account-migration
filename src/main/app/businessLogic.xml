@@ -57,19 +57,7 @@ payload map
                 
             </batch:step>
             <batch:step name="tryToRecoverFromErrors" accept-policy="ONLY_FAILURES">
-                <choice doc:name="Choice">
-                    <when expression="failureExceptionForStep(&quot;getAccountInSalesforceStep&quot;) != null">
-                        <logger message="Salesforce credentials are wrong..." level="ERROR" doc:name="Log the bad SFDC credentials"/>
-                    </when>
-                    <when expression="failureExceptionForStep(&quot;upsertAccountsInSalesforceStep&quot;) != null">
-                        <tracking:custom-event event-name="Validation exception occurs" doc:name="Send Custom Business Event with exception message">
-                            <tracking:meta-data key="Exception message" value="failureExceptionForStep(&quot;upsertAccountsInSalesforceStep&quot;).getMessage()"/>
-                        </tracking:custom-event>
-                    </when>
-                    <otherwise>
-                        <logger level="INFO" doc:name="Log the strange exception" message="Some strange exception occurs, but bussiness event was not generated."/>
-                    </otherwise>
-                </choice>
+                <flow-ref name="tryToRecoverFromErrorsFlow" doc:name="Excecute tryToRecoverFromErrorsFlow"/>
             </batch:step>
         </batch:process-records>
         <batch:on-complete>
